@@ -9,6 +9,7 @@ add_executable(unit_tests
     unit/test_graph.cpp
     unit/test_tensor_shape.cpp
     unit/test_tensor_view.cpp
+    unit/test_status.cpp
 )
 
 # link the onnxcc_lib library to the unit_tests executable.
