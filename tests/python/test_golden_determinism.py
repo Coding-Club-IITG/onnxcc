@@ -1,9 +1,9 @@
-#test_golden_determinism.py - checks that the test models and golden outputs are byte identical across two runs
+#test_golden_determinism.py - checks that the golden outputs are byte identical across two runs
 #Registered with ctest in tests/CMakeLists.txt. Exit codes: 0 = pass, 1 = fail, 77 = skipped
 #Skips when onnx/numpy/onnxruntime are missing or onnxruntime is not the pinned version,
 #unless ONNXCC_REQUIRE_ORT=1 is set (the CI python job sets it so a broken setup fails instead of skipping)
 
-import argparse, filecmp, os, re, shutil, subprocess, sys, tempfile
+import argparse, filecmp, os, re, subprocess, sys, tempfile
 from pathlib import Path
 
 SKIP=77
@@ -41,7 +41,7 @@ def compare_dirs(a, b, what):
 
 def main():
     repo_default=Path(__file__).resolve().parents[2]
-    p=argparse.ArgumentParser(description="Byte-for-byte determinism test for the fixture and golden scripts")
+    p=argparse.ArgumentParser(description="Byte-for-byte determinism test for the golden output script")
     p.add_argument("--repo-root", default=repo_default, help="onnxcc repository root")
     args=p.parse_args()
 
@@ -68,22 +68,15 @@ def main():
     with tempfile.TemporaryDirectory(prefix="onnxcc_det_") as tmp:
         tmp=Path(tmp)
 
-        #1. test models: generate_test_models.py writes next to itself,
-        #   so run a copy in two fresh folders instead of touching scripts/
-        model_dirs=[]
-        for run_id in ("run1", "run2"):
-            d=tmp/"models"/run_id
-            d.mkdir(parents=True)
-            shutil.copy(models, d/models.name)
-            run([sys.executable, models.name], cwd=d)
-            (d/models.name).unlink()
-            model_dirs.append(d)
-        compare_dirs(*model_dirs, "test models")
+        #1. test models: run the fixture generator once, it writes to tests/fixtures
+        #   (only the golden outputs are compared, not the models)
+        run([sys.executable, models], cwd=args.repo_root)
+        fixtures=Path(args.repo_root)/"tests"/"fixtures"
 
         #2. golden outputs for every model, with all intermediates
-        onnx_files=sorted(model_dirs[0].glob("*.onnx"))
+        onnx_files=sorted(fixtures.glob("*.onnx"))
         if not onnx_files:
-            fail("generate_test_models.py produced no .onnx files")
+            fail(f"generate_test_models.py produced no .onnx files in {fixtures}")
         for model in onnx_files:
             inp=model.with_name(f"{model.stem}_input.bin")
             if not inp.is_file():
