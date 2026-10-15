@@ -3,20 +3,30 @@ from onnx import helper, TensorProto
 import numpy as np
 import os
 
-np.random.seed(42)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "tests", "fixtures")
 
 def create_tensor(name, array):
     return helper.make_tensor(name, TensorProto.FLOAT, list(array.shape), array.flatten().tolist())
 
+def get_model_path(output_dir, model_name):
+    os.makedirs(output_dir, exist_ok=True)
+    return os.path.join(output_dir, f"{model_name}.onnx")
 
 # MLP
 
 def build_mlp():
-    ow1 = np.random.rand(4,8).astype(np.float32)
-    ob1 = np.random.rand(8).astype(np.float32)
+    rng = np.random.default_rng(43)
 
-    ow2 = np.random.rand(8,2).astype(np.float32)
-    ob2 = np.random.rand(2).astype(np.float32)
+    ow1 = (
+        rng.standard_normal((4, 8)) * np.sqrt(2.0 / 4)
+    ).astype(np.float32)
+    ob1 = np.zeros(8, dtype=np.float32)
+
+    ow2 = (
+        rng.standard_normal((8, 2)) * np.sqrt(2.0 / 8)
+    ).astype(np.float32)
+    ob2 = np.zeros(2, dtype=np.float32)
 
     w1 = create_tensor("w1", ow1)
     b1 = create_tensor("b1", ob1)
@@ -52,9 +62,8 @@ def build_mlp():
         opset_imports=[helper.make_opsetid("", 13)],
     )
     model_def.ir_version = 8
-    
-    base_dir = os.path.dirname(__file__) if "__file__" in globals() else os.getcwd()
-    path = os.path.join(base_dir, "mlp.onnx")
+
+    path = get_model_path(OUTPUT_DIR, "mlp")
 
     return (model_def, path)
 
@@ -79,17 +88,31 @@ def verify_mlp(model):
 # LeNet
 
 def build_lenet():
-    conv1_w_arr = np.random.rand(6,1,5,5).astype(np.float32)
-    conv1_b_arr = np.random.rand(6).astype(np.float32)
+    rng = np.random.default_rng(42)
 
-    conv2_w_arr = np.random.rand(16,6,5,5).astype(np.float32)
-    conv2_b_arr = np.random.rand(16).astype(np.float32)
+    # Conv1: fan_in = 1 * 5 * 5 = 25
+    conv1_w_arr = (
+        rng.standard_normal((6, 1, 5, 5)) * np.sqrt(2.0 / 25)
+    ).astype(np.float32)
+    conv1_b_arr = np.zeros(6, dtype=np.float32)
 
-    fc1_w_arr = np.random.rand(256,120).astype(np.float32)
-    fc1_b_arr = np.random.rand(120).astype(np.float32)
+    # Conv2: fan_in = 6 * 5 * 5 = 150
+    conv2_w_arr = (
+        rng.standard_normal((16, 6, 5, 5)) * np.sqrt(2.0 / 150)
+    ).astype(np.float32)
+    conv2_b_arr = np.zeros(16, dtype=np.float32)
 
-    fc2_w_arr = np.random.rand(120,10).astype(np.float32)
-    fc2_b_arr = np.random.rand(10).astype(np.float32)
+    # FC1: fan_in = 256
+    fc1_w_arr = (
+        rng.standard_normal((256, 120)) * np.sqrt(2.0 / 256)
+    ).astype(np.float32)
+    fc1_b_arr = np.zeros(120, dtype=np.float32)
+
+    # FC2: fan_in = 120
+    fc2_w_arr = (
+        rng.standard_normal((120, 10)) * np.sqrt(2.0 / 120)
+    ).astype(np.float32)
+    fc2_b_arr = np.zeros(10, dtype=np.float32)
 
     conv1_w = create_tensor("conv1_w", conv1_w_arr)
     conv1_b = create_tensor("conv1_b", conv1_b_arr)
@@ -162,8 +185,7 @@ def build_lenet():
     )
     model_def.ir_version = 8
 
-    base_dir = os.path.dirname(__file__) if "__file__" in globals() else os.getcwd()
-    path = os.path.join(base_dir, "lenet.onnx")
+    path = get_model_path(OUTPUT_DIR, "lenet")
 
     return (model_def, path)
 
@@ -188,23 +210,29 @@ def verify_lenet(model):
 
 
 def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    # Generate MLP artifacts
     model, model_path = build_mlp()
     verify_mlp(model)
     onnx.save(model, model_path)
 
-    bin_path = os.path.join(os.path.dirname(model_path), "mlp_input.bin")
-    make_input().tofile(bin_path)
-    assert os.path.getsize(bin_path) == 16
-    print("wrote", os.path.basename(model_path), "and", os.path.basename(bin_path))
+    mlp_input_path = os.path.join(OUTPUT_DIR, "mlp_input.bin")
+    make_input().tofile(mlp_input_path)
+    assert os.path.getsize(mlp_input_path) == 16
 
+    print("wrote", model_path, "and", mlp_input_path)
+
+    # Generate LeNet artifacts
     model, model_path = build_lenet()
     verify_lenet(model)
     onnx.save(model, model_path)
 
-    bin_path = os.path.join(os.path.dirname(model_path), "lenet_input.bin")
-    make_lenet_input().tofile(bin_path)
-    assert os.path.getsize(bin_path) == 3136
-    print("wrote", os.path.basename(model_path), "and", os.path.basename(bin_path))
+    lenet_input_path = os.path.join(OUTPUT_DIR, "lenet_input.bin")
+    make_lenet_input().tofile(lenet_input_path)
+    assert os.path.getsize(lenet_input_path) == 3136
+
+    print("wrote", model_path, "and", lenet_input_path)
 
 
 if __name__ == "__main__":
