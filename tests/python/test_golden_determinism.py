@@ -1,9 +1,9 @@
-#test_golden_determinism.py - checks that the golden outputs are byte identical across two runs
+#test_golden_determinism.py - checks that the test models and golden outputs are byte identical across two runs
 #Registered with ctest in tests/CMakeLists.txt. Exit codes: 0 = pass, 1 = fail, 77 = skipped
 #Skips when onnx/numpy/onnxruntime are missing or onnxruntime is not the pinned version,
 #unless ONNXCC_REQUIRE_ORT=1 is set (the CI python job sets it so a broken setup fails instead of skipping)
 
-import argparse, filecmp, os, re, subprocess, sys, tempfile
+import argparse, filecmp, os, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 SKIP=77
@@ -39,9 +39,23 @@ def compare_dirs(a, b, what):
             fail(f"{what}: {name} differs between runs")
     print(f"ok: {what} ({len(files_a)} files identical)")
 
+def fixture_files(fixtures):
+    #only the files generate_test_models.py writes, not golden outputs that may also live in tests/fixtures
+    return sorted(list(fixtures.glob("*.onnx"))+list(fixtures.glob("*_input.bin")))
+
+def generate_models(models, repo_root, fixtures, snapshot):
+    #delete the old fixtures first so a run that writes nothing cannot pass by reusing old files
+    for f in fixture_files(fixtures):
+        f.unlink()
+    run([sys.executable, models], cwd=repo_root)
+    #copy this run's files aside, the next run overwrites tests/fixtures
+    snapshot.mkdir(parents=True)
+    for f in fixture_files(fixtures):
+        shutil.copy(f, snapshot/f.name)
+
 def main():
     repo_default=Path(__file__).resolve().parents[2]
-    p=argparse.ArgumentParser(description="Byte-for-byte determinism test for the golden output script")
+    p=argparse.ArgumentParser(description="Byte-for-byte determinism test for the fixture and golden scripts")
     p.add_argument("--repo-root", default=repo_default, help="onnxcc repository root")
     args=p.parse_args()
 
@@ -68,10 +82,15 @@ def main():
     with tempfile.TemporaryDirectory(prefix="onnxcc_det_") as tmp:
         tmp=Path(tmp)
 
-        #1. test models: run the fixture generator once, it writes to tests/fixtures
-        #   (only the golden outputs are compared, not the models)
-        run([sys.executable, models], cwd=args.repo_root)
+        #1. test models: generate_test_models.py always writes to tests/fixtures,
+        #   so run it twice there and keep a snapshot of each run to compare
         fixtures=Path(args.repo_root)/"tests"/"fixtures"
+        snapshots=[]
+        for run_id in ("run1", "run2"):
+            snapshot=tmp/"models"/run_id
+            generate_models(models, args.repo_root, fixtures, snapshot)
+            snapshots.append(snapshot)
+        compare_dirs(*snapshots, "test models")
 
         #2. golden outputs for every model, with all intermediates
         onnx_files=sorted(fixtures.glob("*.onnx"))
