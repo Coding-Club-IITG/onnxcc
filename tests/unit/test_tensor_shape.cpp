@@ -1,9 +1,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 
+#include "onnxcc/ir/datatype.h"
 #include "onnxcc/ir/tensor_shape.h"
 
 using onnxcc::DataType;
@@ -73,6 +75,33 @@ TEST(TensorShapeTest, UndefinedDataTypeThrows)
     );
 }
 
+// dtype_size contract: num_bytes() divides by the size, so it must never be 0
+// Every defined type must have a nonzero size
+TEST(TensorShapeTest, EveryDefinedDataTypeHasNonzeroSize)
+{
+    for (DataType dt : {DataType::FLOAT32, DataType::INT32, DataType::INT64,
+                        DataType::BOOL, DataType::FLOAT64})
+    {
+        EXPECT_GT(onnxcc::dtype_size(dt), 0u);
+    }
+}
+
+TEST(TensorShapeTest, DtypeSizeKnownSizes)
+{
+    EXPECT_EQ(onnxcc::dtype_size(DataType::FLOAT32), 4u);
+    EXPECT_EQ(onnxcc::dtype_size(DataType::INT32),   4u);
+    EXPECT_EQ(onnxcc::dtype_size(DataType::INT64),   8u);
+    EXPECT_EQ(onnxcc::dtype_size(DataType::BOOL),    1u);
+    EXPECT_EQ(onnxcc::dtype_size(DataType::FLOAT64), 8u);
+}
+
+// UNDEFINED and out-of-range values must throw instead of returning 0
+TEST(TensorShapeTest, DtypeSizeThrowsInsteadOfReturningZero)
+{
+    EXPECT_THROW(onnxcc::dtype_size(DataType::UNDEFINED), std::logic_error);
+    EXPECT_THROW(onnxcc::dtype_size(static_cast<DataType>(0x7F)), std::logic_error);
+}
+
 // Three-way comparison (<=>)
 TEST(TensorShapeTest, EqualShapesCompareEqual)
 {
@@ -116,6 +145,34 @@ TEST(TensorShapeTest, DynamicDimensionIsDetected)
     EXPECT_EQ(shape.to_string(), "[2, ?, 4]");
 
     EXPECT_THROW(shape.num_elements(), std::logic_error);
+}
+
+// Only -1 renders as '?'. Other negative dims are invalid and stay visible
+TEST(TensorShapeTest, OtherNegativeDimsStayDistinguishable)
+{
+    TensorShape shape{{-2, -1, -100}};
+
+    EXPECT_TRUE(shape.is_dynamic());
+    EXPECT_EQ(shape.to_string(), "[-2, ?, -100]");
+}
+
+// to_string() is a diagnostic and must never throw, even for dynamic shapes
+TEST(TensorShapeTest, ToStringDoesNotThrowOnDynamicShape)
+{
+    TensorShape shape{{-1, 3}};
+
+    EXPECT_NO_THROW(shape.to_string());
+    EXPECT_EQ(shape.to_string(), "[?, 3]");
+}
+
+// Shapes with one element or zero elements must still print every dim
+TEST(TensorShapeTest, ToStringKeepsAllDimsForDegenerateShapes)
+{
+    TensorShape ones{{1, 1}};
+    TensorShape has_zero{{0, 3}};
+
+    EXPECT_EQ(ones.to_string(), "[1, 1]");
+    EXPECT_EQ(has_zero.to_string(), "[0, 3]");
 }
 
 TEST(TensorShapeTest, ZeroDimensionProducesZeroElements)

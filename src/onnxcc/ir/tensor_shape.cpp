@@ -29,7 +29,13 @@ std::size_t onnxcc::TensorShape::num_elements() const
 std::size_t onnxcc::TensorShape::num_bytes(onnxcc::DataType dt) const
 {
     std::size_t elements = num_elements();
+
+    // dtype_size() returns a nonzero size for every defined DataType and throws for UNDEFINED (an undefined type has no size). It never returns 0.
+    // The overflow check below divides by data_size. If a zero-sized type is ever added, this would be a division by zero.
     std::size_t data_size = dtype_size(dt);
+
+    // Overflow check in division form: data_size * elements > max implies max / data_size < elements.
+    // If elements is 0 this is never true and the result is 0, which is correct.
     if ((std::numeric_limits<std::size_t>::max()) / data_size < elements)
     {
         throw std::overflow_error("number of tensor bytes exceeds the representable range");
@@ -40,19 +46,22 @@ std::size_t onnxcc::TensorShape::num_bytes(onnxcc::DataType dt) const
 std::string onnxcc::TensorShape::to_string() const
 {
     std::string result = "[";
+    bool first = true;
     for (const std::int64_t &dim : dims)
     {
-        // If string has no element then we do not put a comma.
-        if (result != "[")
+        if (!first)
         {
             result += ", ";
         }
-        if (dim < 0)
+        first = false;
+
+        if (dim == -1)
         {
             result += "?";
         }
         else
         {
+            // Valid non-negative dims, and invalid negatives other than -1, which stay visible.
             result += std::to_string(dim);
         }
     }
