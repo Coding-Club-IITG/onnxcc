@@ -4,6 +4,13 @@
 #include <utility>
 #include <stdexcept>
 
+// Explicit includes so this file does not rely on transitive includes. std::visit and std::variant_size_v need <variant> directly.
+#include <optional>
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
+
 
 // Internal helpers for error messages. The anonymous namespace gives them internal linkage so they stay private to this file and can't collide with other translation units.
 namespace{
@@ -27,27 +34,17 @@ std::string_view type_name()
     else if constexpr (std::is_same_v<T, onnxcc::Tensor>)
         return "Tensor";
     else
-        return "unknown";
+        // No "unknown" fallback: a type that is not an Attribute alternative (or a new alternative without a name here) fails to compile instead of printing a vague name.
+        static_assert(!sizeof(T), "type_name<T>: not an Attribute alternative");
 }
 
 // Helper to identify the type name of the attribute.
 std::string_view held_name(const onnxcc::Attribute &attr)
 {
-    // std::holds_alternative checks if a variant currently contains a value of a particular type.
-    if (std::holds_alternative<std::int64_t>(attr))
-        return type_name<std::int64_t>();
-    if (std::holds_alternative<float>(attr))
-        return type_name<float>();
-    if (std::holds_alternative<std::string>(attr))
-        return type_name<std::string>();
-    if (std::holds_alternative<std::vector<std::int64_t>>(attr))
-        return type_name<std::vector<std::int64_t>>();
-    if (std::holds_alternative<std::vector<float>>(attr))
-        return type_name<std::vector<float>>();
-    if (std::holds_alternative<onnxcc::Tensor>(attr))
-        return type_name<onnxcc::Tensor>();
-
-    return "unknown";
+    // std::visit calls the lambda with whichever alternative the variant currently holds, so this follows the variant automatically. A new alternative without a type_name<T> entry fails to compile, so there is no "unknown" case.
+    return std::visit(
+        [](const auto &v) { return type_name<std::decay_t<decltype(v)>>(); },
+        attr);
 }
 } //namespace
 
@@ -55,23 +52,25 @@ template <typename T>
 std::optional<T> onnxcc::get_attr(const onnxcc::Node &node, std::string_view name)
 {
     // Unordered_map .find wants std::string so we convert name into it.
-    auto value = node.attributes.find(std::string(name));
+    const auto attr_iter = node.attributes.find(std::string(name));
 
-    // Returns nullopt when attribute not found as per requirement
-    if (value == node.attributes.end())
+    // Returns nullopt when attribute not found as per requirement.
+    if (attr_iter == node.attributes.end())
         return std::nullopt;
 
+    const Attribute &attr_variant = attr_iter->second;
+
     // std::get_if<T> is a non-throwing check: returns a pointer to the T if the variant holds one, otherwise nullptr.
-    // Must copy, not move: 'it' points into the Node's attribute map, and node is const&.
-    if (const T *it = std::get_if<T>(&value->second))
-        return *it;
+    // Must copy, not move: 'typed_value' points into the Node's attribute map, and node is const&.
+    if (const T *typed_value = std::get_if<T>(&attr_variant))
+        return *typed_value;
 
     // Type mismatch runtime error: clearly reports node name, op_type, attribute name and both types.
     throw std::runtime_error(
         "Node '" + node.name +
         "' (op_type '" + node.op_type +
         "'): attribute '" + std::string(name) +
-        "' has type " + std::string(held_name(value->second)) +
+        "' has type " + std::string(held_name(attr_variant)) +
         ", but was requested as " + std::string(type_name<T>()));
 }
 
