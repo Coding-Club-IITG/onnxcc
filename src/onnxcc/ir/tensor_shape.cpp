@@ -1,6 +1,12 @@
-#include "tensor_shape.h"
-#include "datatype.h"
-#include <limits>
+#include "onnxcc/ir/tensor_shape.h"
+#include "onnxcc/ir/datatype.h"
+
+// Explicit includes so this file does not rely on transitive includes.
+#include <cstddef>    // std::size_t
+#include <cstdint>    // std::int64_t
+#include <limits>     // std::numeric_limits
+#include <stdexcept>  // std::logic_error, std::overflow_error
+#include <string>     // std::string, std::to_string
 
 std::size_t onnxcc::TensorShape::num_elements() const
 {
